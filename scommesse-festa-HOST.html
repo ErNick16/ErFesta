@@ -27,7 +27,7 @@ const GUEST_ONLY=false,START=100,CH='ABCDEFGHJKLMNPQRSTUVWXYZ23456789',LS=localS
 const $=s=>document.querySelector(s),esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const fmt=n=>Math.round(n*100)/100,uid=()=>Math.random().toString(36).slice(2,10);
 const msg=t=>$('#msg').textContent=t||'';
-let DB=GUEST_ONLY?'':LS.fb_db||'',code='',inLobby=false,S={},sel={},ui={},multi=false,slip={},slipStake='',armed='',es,poll,token=LS.fb_token||(LS.fb_token=crypto.randomUUID());
+let DB='https://festa-26-default-rtdb.europe-west1.firebasedatabase.app',code='',inLobby=false,S={},sel={},ui={open:{}},multi=false,slip={},slipStake='',armed='',es,poll,token=LS.fb_token||(LS.fb_token=crypto.randomUUID());
 const O=k=>Object.entries(S[k]||{}).map(([id,v])=>({id,...v}));
 const isHost=()=>S.meta&&S.meta.host===token;
 const url=(p,c=code)=>`${DB}/lobbies/${c}${p}.json`;
@@ -44,10 +44,10 @@ function bal(id){return fmt(balRaw(id)+((S.adj||{})[id]||0))}
 function slipCard(){const ids=Object.keys(slip).filter(i=>S.events&&S.events[i]&&S.events[i].status==='open');let q=1;
  const rows=ids.map(i=>{const e=S.events[i],o=e.options[slip[i]];q*=o.odds;return `<div class="row sp"><span>${esc(e.title)} → <b>${esc(o.name)}</b></span><span class="q">${o.odds}</span></div>`}).join('');
  return `<div class="card"><b>Schedina multipla</b>${rows||'<div class="mut">Scegli almeno 2 esiti da eventi diversi: vince solo se sono tutti giusti.</div>'}${ids.length>=2?`<div class="row sp" style="margin:6px 0"><span>Quota totale</span><span class="q">${fmt(q)}</span></div><div class="row"><input type="number" min="1" id="ms" placeholder="Quanto punti?" value="${slipStake||''}" style="flex:1"><button id="mb">Scommetti</button></div><div class="mut">Vincita potenziale: ${fmt((+slipStake||0)*q)} 🪙</div>`:''}</div>`}
-const invite=()=>code+'@'+DB.replace('https://','');
+const invite=()=>code;
 
 async function enter(c,db){
-  DB=db;code=c;const r=await fetch(url('/meta'));const m=await r.json();
+  code=c;const r=await fetch(url('/meta'));const m=await r.json();
   if(!m){msg('Lobby non trovata: controlla il codice invito.');return false}
   LS.fb_last=JSON.stringify({c,db});inLobby=true;await pull();watch();return true}
 async function create(){
@@ -56,17 +56,17 @@ async function create(){
     await fetch(url('/meta',c),{method:'PUT',body:JSON.stringify({host:token,at:Date.now()})});await enter(c,DB)}
   catch(e){msg('Impossibile contattare il database: controlla l\'indirizzo e le regole.')}}
 
-const JOIN=()=>`<div class="card"><b>Entra in una lobby</b><p class="mut">Incolla il codice invito ricevuto dall'host.</p><input id="jc" placeholder="Codice invito" value="${esc(ui.jc||'')}" style="margin:8px 0"><button id="jb" class="go">Entra</button></div>`;
+const JOIN=()=>`<div class="card"><b>Entra in una lobby</b><p class="mut">Inserisci il codice di 4 caratteri ricevuto dall'host.</p><input id="jc" placeholder="Codice lobby" maxlength="4" value="${esc(ui.jc||'')}" style="margin:8px 0;text-transform:uppercase"><button id="jb" class="go">Entra</button></div>`;
 function render(){
   const a=$('#app'),k=document.activeElement&&document.activeElement.id;let h='';
   if(!inLobby){
     if(GUEST_ONLY)h=JOIN();else if(!DB||ui.cfg)h=`<div class="card"><b>Configura il database (solo l'host, una volta)</b><p class="mut">Incolla l'indirizzo del tuo Firebase Realtime Database (vedi istruzioni).</p><input id="dbu" placeholder="https://xxxx-default-rtdb.firebaseio.com" value="${esc(DB)}"><button id="dbs" style="margin-top:8px">Salva e verifica</button></div>`;
     else{const l=LS.fb_last?JSON.parse(LS.fb_last):null;
-      h=`<div class="card"><b>Sei l'host?</b><p class="mut">Crea la lobby: resterà online anche a schermo spento.</p><button id="mk">Crea lobby</button> <button class="o" id="cf">Database</button>${l?` <button class="o" id="rs">Riprendi ${l.c}</button>`:''}</div>
+      h=`<div class="card"><b>Sei l'host?</b><p class="mut">Crea la lobby: resterà online anche a schermo spento.</p><button id="mk">Crea lobby</button>${l?` <button class="o" id="rs">Riprendi ${l.c}</button>`:''}</div>
       <div class="card"><b>Sei un invitato?</b><input id="jc" placeholder="Codice invito (es. K7QM@xxxx-default-rtdb...)" value="${esc(ui.jc||'')}" style="margin:8px 0"><button id="jb" class="go">Entra</button></div>`}
   } else {
     const me=(S.players||{})[token],host=isHost();
-    if(host)h+=`<div class="card"><div class="mut">Codice invito da mandare agli invitati (tocca per selezionare)</div><div class="code">${esc(invite())}</div><div class="mut">${O('players').length} giocatori · puoi chiudere l'app, la lobby resta attiva</div></div>`;
+    if(host)h+=`<div class="card"><div class="mut">Codice lobby da dare agli invitati</div><div class="code">${esc(invite())}</div><div class="mut">${O('players').length} giocatori · puoi chiudere l'app, la lobby resta attiva</div></div>`;
     else if(!me)h+=`<div class="card"><b>Come ti chiami?</b><p class="mut">Riceverai ${START} gettoni.</p><div class="row"><input id="nick" maxlength="20" placeholder="Il tuo nome" value="${esc(ui.nick||'')}"><button id="join">Entra</button></div></div>`;
     else h+=`<div class="card"><div class="mut">Ciao ${esc(me)}, saldo</div><div class="bal">${bal(token)} 🪙</div><div class="mut">Lobby ${code}</div></div>`;
     if(host){
@@ -82,7 +82,7 @@ function render(){
     for(const g of secs){
       const es_=ev.filter(e=>(e.gid||'')===g.id||(g.id===''&&e.gid&&!(S.groups||{})[e.gid]));
       if(!es_.length&&!(host&&g.id))continue;any=true;
-      h+=`<details open><summary>📁 ${esc(g.name)} <span class="b">${es_.length}</span> ${host&&g.id?`<button class="${armed==='g'+g.id?'go':'o'}" data-delg="${g.id}" style="font-size:12px;padding:4px 8px">${armed==='g'+g.id?'Elimina gruppo e scommesse?':'🗑'}</button>`:''}</summary>${es_.map(e=>evCard(e,me,host)).join('')||'<div class="mut">Vuoto</div>'}</details>`}
+      h+=`<details data-g="${g.id||'_'}" ${(host?ui.open[g.id||'_']!==false:ui.open[g.id||'_'])?'open':''}><summary>📁 ${esc(g.name)} <span class="b">${es_.length}</span> ${host&&g.id?`<button class="${armed==='g'+g.id?'go':'o'}" data-delg="${g.id}" style="font-size:12px;padding:4px 8px">${armed==='g'+g.id?'Elimina gruppo e scommesse?':'🗑'}</button>`:''}</summary>${es_.map(e=>evCard(e,me,host)).join('')||'<div class="mut">Vuoto</div>'}</details>`}
     if(!any)h+='<div class="mut">Nessuna scommessa pubblicata.</div>';
     const mine=O('bets').filter(x=>x.t===token);if(mine.length)h+='<h2>Le mie giocate</h2>'+mine.map(betLine).join('');
     const lb=O('players').map(p=>({n:p.name||S.players[p.id],id:p.id})).map(p=>({n:S.players[p.id],b:bal(p.id)})).sort((x,y)=>y.b-x.b);
@@ -112,8 +112,7 @@ function bind(){
     try{const r=await fetch(v+'/.json');if(!r.ok)throw 0;DB=v;LS.fb_db=v;ui.cfg=false;msg();render()}catch(e){msg('Non riesco a leggere il database: controlla indirizzo e regole (.read/.write = true).')}});
   B('#cf',()=>{ui.cfg=true;render()});B('#mk',create);
   B('#rs',async()=>{const l=JSON.parse(LS.fb_last);await enter(l.c,l.db)});
-  I('#jc','jc');B('#jb',async()=>{const v=(ui.jc||'').trim(),m=v.match(/^([A-Za-z0-9]{4})@(.+)$/);if(!m)return msg('Codice invito non valido: copialo per intero.');
-    const h=m[2].replace(/^https?:\/\//,'').replace(/\/+$/,'');try{await enter(m[1].toUpperCase(),'https://'+h)}catch(e){msg('Impossibile contattare la lobby.')}});
+  I('#jc','jc');B('#jb',async()=>{const m=(ui.jc||'').trim().match(/^([A-Za-z0-9]{4})/);if(!m)return msg('Inserisci il codice di 4 caratteri.');try{await enter(m[1].toUpperCase())}catch(e){msg('Impossibile contattare la lobby.')}});
   I('#nick','nick');B('#join',()=>{const n=(ui.nick||'').trim();if(n)put('/players/'+token,n)});
   I('#gn','gn');B('#ga',()=>{const n=(ui.gn||'').trim();if(!n)return;ui.gn='';put('/groups/'+uid(),{name:n,at:Date.now()})});
   I('#et','et');I('#eo','eo');const eg=$('#eg');if(eg)eg.onchange=x=>ui.eg=x.target.value;
@@ -140,6 +139,7 @@ function bind(){
     for(const x of O('bets').filter(x=>legs(x).some(l=>l.e===i)))await fetch(url('/bets/'+x.id),{method:'DELETE'});del('/events/'+i)});
   on('[data-delg]',b=>b.onclick=async e=>{e.preventDefault();const g=b.dataset.delg,d='g'+g;if(armed!==d){armed=d;return render()}armed='';
     for(const ev of O('events').filter(x=>x.gid===g)){for(const x of O('bets').filter(x=>legs(x).some(l=>l.e===ev.id)))await fetch(url('/bets/'+x.id),{method:'DELETE'});await fetch(url('/events/'+ev.id),{method:'DELETE'})}del('/groups/'+g)});
+  on('details[data-g]',d=>d.ontoggle=()=>{ui.open[d.dataset.g]=d.open});
   B('#ex',()=>{stop();inLobby=false;S={};render()});
 }
 (async()=>{const l=LS.fb_last?JSON.parse(LS.fb_last):null;if(l&&(DB||GUEST_ONLY)){try{await enter(l.c,l.db)}catch(e){}}render()})();
