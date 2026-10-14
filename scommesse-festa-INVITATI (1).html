@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="it"><head><meta charset="utf-8"><title>Scommesse della Festa</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<style>
+:root{--bg:#0e1a14;--card:#16281f;--ink:#f1f5f2;--mut:#8fa89a;--acc:#f5c542;--ok:#3ddc84;--ko:#ff6b6b;--line:#24402f}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.4 system-ui,sans-serif}
+main{max-width:640px;margin:0 auto;padding:16px}
+h1{margin:0 0 4px;font-size:24px}h2{font-size:15px;color:var(--mut);text-transform:uppercase;letter-spacing:.06em;margin:24px 0 8px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:12px}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.sp{justify-content:space-between}
+button{font:inherit;border:0;border-radius:10px;padding:10px 14px;background:var(--acc);color:#1a1400;font-weight:700;cursor:pointer}
+button.o{background:transparent;color:var(--ink);border:1px solid var(--line)}button.sel{outline:3px solid var(--acc)}
+button.go{background:var(--ok);color:#06210f}button:disabled{opacity:.4}
+input,textarea,select{font:inherit;width:100%;box-sizing:border-box;padding:10px;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--ink)}
+.opt{flex:1 1 40%;display:flex;justify-content:space-between;gap:8px}
+.q{color:var(--acc);font-weight:800}.mut{color:var(--mut);font-size:14px}
+.b{font-size:12px;padding:2px 8px;border-radius:20px;border:1px solid var(--line);color:var(--mut)}
+.w{color:var(--ok)}.l{color:var(--ko)}.bal{font-size:28px;font-weight:800;color:var(--acc)}
+.code{font-size:20px;font-weight:900;color:var(--acc);word-break:break-all;user-select:all}
+details{margin-bottom:12px}summary{cursor:pointer;font-weight:800;font-size:18px;padding:8px 0;list-style:none}
+#msg{color:var(--ko);min-height:20px}
+</style></head><body><main>
+<h1>🎉 Scommesse della Festa</h1><div id="msg"></div><div id="app"></div>
+</main>
+<script>
+const GUEST_ONLY=true,START=100,CH='ABCDEFGHJKLMNPQRSTUVWXYZ23456789',LS=localStorage;
+const $=s=>document.querySelector(s),esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const fmt=n=>Math.round(n*100)/100,uid=()=>Math.random().toString(36).slice(2,10);
+const msg=t=>$('#msg').textContent=t||'';
+let DB='https://festa-26-default-rtdb.europe-west1.firebasedatabase.app',code='',inLobby=false,S={},sel={},ui={open:{}},multi=false,slip={},slipStake='',armed='',es,poll,token=LS.fb_token||(LS.fb_token=crypto.randomUUID());
+const O=k=>Object.entries(S[k]||{}).map(([id,v])=>({id,...v}));
+const isHost=()=>S.meta&&S.meta.host===token;
+const url=(p,c=code)=>`${DB}/lobbies/${c}${p}.json`;
+const put=(p,v)=>fetch(url(p),{method:'PUT',body:JSON.stringify(v)}).then(pull);
+const patch=(p,v)=>fetch(url(p),{method:'PATCH',body:JSON.stringify(v)}).then(pull);
+const del=p=>fetch(url(p),{method:'DELETE'}).then(pull);
+async function pull(){try{const r=await fetch(url(''));S=(await r.json())||{};msg();render()}catch(e){msg('Connessione assente, riprovo…')}}
+function watch(){stop();es=new EventSource(url(''));let t;const f=()=>{clearTimeout(t);t=setTimeout(pull,150)};es.addEventListener('put',f);es.addEventListener('patch',f);poll=setInterval(pull,8000)}
+function stop(){if(es)es.close();clearInterval(poll)}
+const legs=x=>x.legs||[{e:x.e,opt:x.opt,odds:x.odds}];
+function bst(x){let p=0;for(const l of legs(x)){const e=(S.events||{})[l.e];if(!e)continue;if(e.status!=='settled')p=1;else if(e.winner!==l.opt)return'lost'}return p?'pending':'won'}
+function balRaw(id){let b=START;for(const x of O('bets')){if(x.t!==id)continue;b-=x.stake;if(bst(x)==='won')b+=x.stake*x.odds}return b}
+function bal(id){return fmt(balRaw(id)+((S.adj||{})[id]||0))}
+function slipCard(){const ids=Object.keys(slip).filter(i=>S.events&&S.events[i]&&S.events[i].status==='open');let q=1;
+ const rows=ids.map(i=>{const e=S.events[i],o=e.options[slip[i]];q*=o.odds;return `<div class="row sp"><span>${esc(e.title)} → <b>${esc(o.name)}</b></span><span class="q">${o.odds}</span></div>`}).join('');
+ return `<div class="card"><b>Schedina multipla</b>${rows||'<div class="mut">Scegli almeno 2 esiti da eventi diversi: vince solo se sono tutti giusti.</div>'}${ids.length>=2?`<div class="row sp" style="margin:6px 0"><span>Quota totale</span><span class="q">${fmt(q)}</span></div><div class="row"><input type="number" min="1" id="ms" placeholder="Quanto punti?" value="${slipStake||''}" style="flex:1"><button id="mb">Scommetti</button></div><div class="mut">Vincita potenziale: ${fmt((+slipStake||0)*q)} 🪙</div>`:''}</div>`}
+const invite=()=>code;
+const gk=()=>Array.from({length:6},()=>CH[Math.floor(Math.random()*CH.length)]).join('');
+
+async function enter(c,db){
+  code=c;const r=await fetch(url('/meta'));const m=await r.json();
+  if(!m){msg('Lobby non trovata: controlla il codice invito.');return false}
+  LS.fb_last=JSON.stringify({c,db});inLobby=true;await pull();watch();return true}
+async function create(){
+  if(!DB)return;let c='';for(let i=0;i<4;i++)c+=CH[Math.floor(Math.random()*CH.length)];
+  try{const r=await fetch(url('/meta',c));if(await r.json())return create();
+    await fetch(url('/meta',c),{method:'PUT',body:JSON.stringify({host:token,hostKey:gk(),at:Date.now()})});await enter(c,DB)}
+  catch(e){msg('Impossibile contattare il database: controlla l\'indirizzo e le regole.')}}
+
+const JOIN=()=>`<div class="card"><b>Entra in una lobby</b><p class="mut">Inserisci il codice di 4 caratteri ricevuto dall'host.</p><input id="jc" placeholder="Codice lobby" maxlength="4" value="${esc(ui.jc||'')}" style="margin:8px 0;text-transform:uppercase"><button id="jb" class="go">Entra</button></div>`;
+function render(){
+  const a=$('#app'),k=document.activeElement&&document.activeElement.id;let h='';
+  if(!inLobby){
+    if(GUEST_ONLY)h=JOIN();else if(!DB||ui.cfg)h=`<div class="card"><b>Configura il database (solo l'host, una volta)</b><p class="mut">Incolla l'indirizzo del tuo Firebase Realtime Database (vedi istruzioni).</p><input id="dbu" placeholder="https://xxxx-default-rtdb.firebaseio.com" value="${esc(DB)}"><button id="dbs" style="margin-top:8px">Salva e verifica</button></div>`;
+    else{const l=LS.fb_last?JSON.parse(LS.fb_last):null;
+      h=`<div class="card"><b>Sei l'host?</b><p class="mut">Crea la lobby: resterà online anche a schermo spento.</p><button id="mk">Crea lobby</button>${l?` <button class="o" id="rs">Riprendi ${l.c}</button>`:''}</div>
+      <div class="card"><b>Rientra come host</b><p class="mut">Se non riesci più a gestire una lobby già creata.</p><div class="row" style="margin:8px 0"><input id="hc" maxlength="4" placeholder="Codice lobby" value="${esc(ui.hc||'')}" style="flex:1;text-transform:uppercase"><input id="hk" maxlength="6" placeholder="Chiave host" value="${esc(ui.hk||'')}" style="flex:1;text-transform:uppercase"></div><button id="hb">Rientra</button></div>
+      <div class="card"><b>Sei un invitato?</b><input id="jc" placeholder="Codice invito (es. K7QM@xxxx-default-rtdb...)" value="${esc(ui.jc||'')}" style="margin:8px 0"><button id="jb" class="go">Entra</button></div>`}
+  } else {
+    const me=(S.players||{})[token],host=isHost();
+    if(host)h+=`<div class="card"><div class="mut">Codice lobby da dare agli invitati</div><div class="code">${esc(invite())}</div><div class="mut">${O('players').length} giocatori · puoi chiudere l'app, la lobby resta attiva</div><div style="margin-top:8px">🔑 Chiave host: <b class="q">${esc((S.meta||{}).hostKey||'')}</b><div class="mut">Salvala (screenshot): con codice lobby + chiave rientri come host da qualsiasi dispositivo.</div></div></div>`;
+    else if(!me)h+=`<div class="card"><b>Come ti chiami?</b><p class="mut">Riceverai ${START} gettoni.</p><div class="row"><input id="nick" maxlength="20" placeholder="Il tuo nome" value="${esc(ui.nick||'')}"><button id="join">Entra</button></div></div>`;
+    else h+=`<div class="card"><div class="mut">Ciao ${esc(me)}, saldo</div><div class="bal">${bal(token)} 🪙</div><div class="mut">Lobby ${code}</div></div>`;
+    if(host){
+      const gs=O('groups').sort((x,y)=>x.at-y.at);
+      h+=`<h2>Gruppi</h2><div class="card row"><input id="gn" placeholder="Nuovo gruppo (es. Alcol, Ping pong)" value="${esc(ui.gn||'')}" style="flex:1"><button id="ga">Crea gruppo</button></div>
+      <h2>Nuova scommessa</h2><div class="card"><input id="et" placeholder="Evento (es. Chi berrà di più?)" value="${esc(ui.et||'')}"><select id="eg" style="margin-top:8px"><option value="">Generale (nessun gruppo)</option>${gs.map(g=>`<option value="${g.id}" ${ui.eg===g.id?'selected':''}>${esc(g.name)}</option>`).join('')}</select><textarea id="eo" rows="4" style="margin-top:8px" placeholder="Una opzione per riga:&#10;Marco @ 2.5&#10;Giulia @ 3">${esc(ui.eo||'')}</textarea><button id="ea" style="margin-top:8px">Pubblica</button></div>`}
+    if(host){const pl=Object.entries(S.players||{});
+      h+=`<h2>Giocatori (${pl.length})</h2><div class="card">`+(pl.map(([id,n])=>`<div class="row sp" style="margin-bottom:8px"><span>${esc(n)} · <b class="q">${bal(id)} 🪙</b></span><span class="row"><input type="number" id="pa-${id}" placeholder="nuovo saldo" value="${esc(ui['pa-'+id]||'')}" style="width:110px"><button class="o" data-setbal="${id}">Imposta</button><button class="${armed==='p'+id?'go':'o'}" data-rmp="${id}">${armed==='p'+id?'Rimuovi?':'🗑'}</button></span></div>`).join('')||'<div class="mut">Nessun invitato ancora.</div>')+'</div>'}
+    h+='<h2>Scommesse</h2>';
+    if(!host&&me){h+=`<div class="row" style="margin-bottom:10px"><button class="${multi?'o':''}" id="m0">Singola</button><button class="${multi?'':'o'}" id="m1">Multipla</button></div>`;if(multi)h+=slipCard()}
+    const gs=O('groups').sort((x,y)=>x.at-y.at),ev=O('events').sort((x,y)=>(x.status==='open'?0:1)-(y.status==='open'?0:1)||y.at-x.at);
+    const secs=[{id:'',name:'Generale'},...gs];let any=false;
+    for(const g of secs){
+      const es_=ev.filter(e=>(e.gid||'')===g.id||(g.id===''&&e.gid&&!(S.groups||{})[e.gid]));
+      if(!es_.length&&!(host&&g.id))continue;any=true;
+      h+=`<details data-g="${g.id||'_'}" ${(host?ui.open[g.id||'_']!==false:ui.open[g.id||'_'])?'open':''}><summary>📁 ${esc(g.name)} <span class="b">${es_.length}</span> ${host&&g.id?`<button class="${armed==='g'+g.id?'go':'o'}" data-delg="${g.id}" style="font-size:12px;padding:4px 8px">${armed==='g'+g.id?'Elimina gruppo e scommesse?':'🗑'}</button>`:''}</summary>${es_.map(e=>evCard(e,me,host)).join('')||'<div class="mut">Vuoto</div>'}</details>`}
+    if(!any)h+='<div class="mut">Nessuna scommessa pubblicata.</div>';
+    const mine=O('bets').filter(x=>x.t===token);if(mine.length)h+='<h2>Le mie giocate</h2>'+mine.map(betLine).join('');
+    const lb=O('players').map(p=>({n:p.name||S.players[p.id],id:p.id})).map(p=>({n:S.players[p.id],b:bal(p.id)})).sort((x,y)=>y.b-x.b);
+    if(lb.length)h+='<h2>Classifica</h2><div class="card">'+lb.map((p,i)=>`<div class="row sp"><span>${i+1}. ${esc(p.n)}</span><b>${p.b} 🪙</b></div>`).join('')+'</div>';
+    h+='<p><button class="o" id="ex">Esci dalla lobby</button></p>';
+  }
+  a.innerHTML=h;bind();
+  const el=k&&document.getElementById(k);if(el&&/INPUT|TEXTAREA/.test(el.tagName)){el.focus();try{el.setSelectionRange(el.value.length,el.value.length)}catch(e){}}
+}
+function betLine(x){const L=legs(x),st=bst(x),t=st==='won'?`vinta +${fmt(x.stake*x.odds)}`:st==='lost'?'persa':'in corso',c=st==='won'?'w':st==='lost'?'l':'';
+  return `<div class="card row sp"><div>${L.length>1?'<b>Multipla</b> · quota '+fmt(x.odds)+'<br>':''}${L.map(l=>{const e=(S.events||{})[l.e];return e&&e.options[l.opt]?esc(e.title)+' → '+esc(e.options[l.opt].name)+' @ '+l.odds:''}).join('<br>')}<div class="mut">puntati ${x.stake}</div></div><b class="${c}">${t}</b></div>`}
+function evCard(e,me,host){
+  const s=sel[e.id]||{},can=e.status==='open'&&!host&&me;
+  let h=`<div class="card"><div class="row sp"><b>${esc(e.title)}</b><span class="b">${{open:'aperta',closed:'chiusa',settled:'conclusa'}[e.status]}</span></div><div class="row" style="margin-top:10px">`;
+  e.options.forEach((o,i)=>h+=`<button class="o opt ${(e.status==='settled'&&e.winner===i)||(multi?slip[e.id]===i:s.opt===i)?'sel':''}" data-pick="${e.id}:${i}" ${can?'':'disabled'}><span>${esc(o.name)}</span><span class="q">${o.odds}</span></button>`);
+  h+='</div>';
+  if(can&&!multi&&s.opt!==undefined)h+=`<div class="row" style="margin-top:10px"><input type="number" min="1" id="st-${e.id}" placeholder="Quanto punti?" value="${s.stake||''}" style="flex:1"><button data-bet="${e.id}">Scommetti</button></div><div class="mut">Vincita potenziale: ${fmt((+s.stake||0)*e.options[s.opt].odds)} 🪙</div>`;
+  if(host){h+='<div class="row" style="margin-top:10px">';
+    if(e.status==='open')h+=`<button class="o" data-close="${e.id}">Chiudi puntate</button>`;
+    if(e.status!=='settled')h+=`<span class="mut">Vincitore:</span>`+e.options.map((o,i)=>{const id=e.id+':'+i;return `<button class="${armed===id?'go':'o'}" data-win="${id}">${armed===id?'Conferma '+esc(o.name)+'?':esc(o.name)}</button>`}).join('');
+    const d='d'+e.id;h+=`<button class="${armed===d?'go':'o'}" data-del="${e.id}">${armed===d?'Elimina?':'🗑'}</button></div>`}
+  return h+'</div>';
+}
+function bind(){
+  const on=(q,f)=>document.querySelectorAll(q).forEach(f),B=(q,f)=>{const e=$(q);if(e)e.onclick=f},I=(q,k)=>{const e=$(q);if(e)e.oninput=x=>ui[k]=x.target.value};
+  B('#dbs',async()=>{let v=$('#dbu').value.trim().replace(/\/+$/,'');if(!/^https:\/\//.test(v))return msg('L\'indirizzo deve iniziare con https://');
+    try{const r=await fetch(v+'/.json');if(!r.ok)throw 0;DB=v;LS.fb_db=v;ui.cfg=false;msg();render()}catch(e){msg('Non riesco a leggere il database: controlla indirizzo e regole (.read/.write = true).')}});
+  B('#cf',()=>{ui.cfg=true;render()});B('#mk',create);
+  B('#rs',async()=>{const l=JSON.parse(LS.fb_last);await enter(l.c,l.db)});
+  I('#jc','jc');I('#hc','hc');I('#hk','hk');
+  B('#hb',async()=>{const c=(ui.hc||'').trim().toUpperCase(),k=(ui.hk||'').trim().toUpperCase();if(c.length!==4)return msg('Inserisci il codice lobby di 4 caratteri');
+    try{const m=await(await fetch(url('/meta',c))).json();if(!m)return msg('Lobby non trovata');
+      if(m.hostKey&&m.hostKey!==k)return msg('Chiave host errata');
+      if(!m.hostKey)await fetch(url('/meta/hostKey',c),{method:'PUT',body:JSON.stringify(gk())});
+      await fetch(url('/meta/host',c),{method:'PUT',body:JSON.stringify(token)});msg();await enter(c)}catch(e){msg('Errore di connessione')}});
+  B('#jb',async()=>{const m=(ui.jc||'').trim().match(/^([A-Za-z0-9]{4})/);if(!m)return msg('Inserisci il codice di 4 caratteri.');try{await enter(m[1].toUpperCase())}catch(e){msg('Impossibile contattare la lobby.')}});
+  I('#nick','nick');B('#join',()=>{const n=(ui.nick||'').trim();if(n)put('/players/'+token,n)});
+  I('#gn','gn');B('#ga',()=>{const n=(ui.gn||'').trim();if(!n)return;ui.gn='';put('/groups/'+uid(),{name:n,at:Date.now()})});
+  I('#et','et');I('#eo','eo');const eg=$('#eg');if(eg)eg.onchange=x=>ui.eg=x.target.value;
+  B('#ea',()=>{const o=(ui.eo||'').split('\n').map(l=>{const m=l.split('@');return{name:m[0].trim(),odds:parseFloat((m[1]||'').replace(',','.'))}}).filter(x=>x.name&&x.odds>1);
+    if(!(ui.et||'').trim()||o.length<2)return msg('Servono titolo e almeno 2 opzioni "Nome @ quota" (quota > 1)');
+    const ev={title:ui.et.trim(),gid:ui.eg||'',options:o,status:'open',at:Date.now()};ui.et=ui.eo='';msg();put('/events/'+uid(),ev)});
+  on('[data-pick]',b=>b.onclick=()=>{const[i,o]=b.dataset.pick.split(':');if(multi){if(slip[i]===+o)delete slip[i];else slip[i]=+o}else sel[i]={opt:+o,stake:(sel[i]||{}).stake};render()});
+  B('#m0',()=>{multi=false;render()});B('#m1',()=>{multi=true;render()});
+  const ms=$('#ms');if(ms)ms.oninput=x=>slipStake=x.target.value;
+  B('#mb',()=>{const ids=Object.keys(slip).filter(i=>S.events[i]&&S.events[i].status==='open'),st=Math.floor(+slipStake);
+    if(ids.length<2)return msg('Una multipla richiede almeno 2 eventi aperti');if(!(st>=1))return msg('Inserisci una puntata valida');if(st>bal(token))return msg('Gettoni insufficienti!');
+    const L=ids.map(i=>({e:i,opt:slip[i],odds:S.events[i].options[slip[i]].odds})),q=fmt(L.reduce((a,l)=>a*l.odds,1));
+    msg();slip={};slipStake='';put('/bets/'+uid(),{t:token,legs:L,stake:st,odds:q})});
+  on('[id^=pa-]',i=>i.oninput=()=>ui[i.id]=i.value);
+  on('[data-setbal]',b=>b.onclick=()=>{const id=b.dataset.setbal,v=parseFloat(ui['pa-'+id]);if(isNaN(v))return msg('Inserisci il nuovo saldo');ui['pa-'+id]='';msg();put('/adj/'+id,fmt(v-balRaw(id)))});
+  on('[data-rmp]',b=>b.onclick=async()=>{const id=b.dataset.rmp,d='p'+id;if(armed!==d){armed=d;return render()}armed='';for(const x of O('bets').filter(x=>x.t===id))await fetch(url('/bets/'+x.id),{method:'DELETE'});await fetch(url('/adj/'+id),{method:'DELETE'});del('/players/'+id)});
+  on('[id^=st-]',i=>i.oninput=()=>sel[i.id.slice(3)].stake=i.value);
+  on('[data-bet]',b=>b.onclick=()=>{const i=b.dataset.bet,s=sel[i],e=S.events[i],st=Math.floor(+s.stake);
+    if(!(st>=1))return msg('Inserisci una puntata valida');if(st>bal(token))return msg('Gettoni insufficienti!');if(e.status!=='open')return msg('Scommessa chiusa');
+    msg();delete sel[i];put('/bets/'+uid(),{t:token,e:i,opt:s.opt,stake:st,odds:e.options[s.opt].odds})});
+  on('[data-close]',b=>b.onclick=()=>patch('/events/'+b.dataset.close,{status:'closed'}));
+  on('[data-win]',b=>b.onclick=()=>{const id=b.dataset.win;if(armed!==id){armed=id;return render()}armed='';const[i,o]=id.split(':');patch('/events/'+i,{status:'settled',winner:+o})});
+  on('[data-del]',b=>b.onclick=async()=>{const d='d'+b.dataset.del;if(armed!==d){armed=d;return render()}armed='';const i=b.dataset.del;
+    for(const x of O('bets').filter(x=>legs(x).some(l=>l.e===i)))await fetch(url('/bets/'+x.id),{method:'DELETE'});del('/events/'+i)});
+  on('[data-delg]',b=>b.onclick=async e=>{e.preventDefault();const g=b.dataset.delg,d='g'+g;if(armed!==d){armed=d;return render()}armed='';
+    for(const ev of O('events').filter(x=>x.gid===g)){for(const x of O('bets').filter(x=>legs(x).some(l=>l.e===ev.id)))await fetch(url('/bets/'+x.id),{method:'DELETE'});await fetch(url('/events/'+ev.id),{method:'DELETE'})}del('/groups/'+g)});
+  on('details[data-g]',d=>d.ontoggle=()=>{ui.open[d.dataset.g]=d.open});
+  B('#ex',()=>{stop();inLobby=false;S={};render()});
+}
+(async()=>{const l=LS.fb_last?JSON.parse(LS.fb_last):null;if(l&&(DB||GUEST_ONLY)){try{await enter(l.c,l.db)}catch(e){}}render()})();
+</script></body></html>
